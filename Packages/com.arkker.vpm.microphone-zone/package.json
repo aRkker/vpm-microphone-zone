@@ -6,7 +6,7 @@
     "author" : {
         "name" : "aRkker",
         "email" : "",
-        "url" : "https://gitea.vrcp.pm/aRkker/vpm-packages"
+        "url" : "https://arkker.github.io/vpm-repo/"
     },
     "vpmDependencies": {
         "com.texelsaur.video": "^2.4.0"
