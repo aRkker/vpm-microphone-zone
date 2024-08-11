@@ -25,7 +25,7 @@ public class MicrophoneZone : UdonSharpBehaviour
     [Header("The player that will be synced with this zone")]
     [SerializeField] private SyncPlayer TXLPlayer;
 
-
+    // Local player in zone
 
     private bool localPlayerInZone = false;
 

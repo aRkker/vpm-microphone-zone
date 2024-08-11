@@ -1,7 +1,7 @@
 {
     "name" : "com.arkker.vpm.microphone-zone",
     "displayName" : "aRkker's Microphone Zone",
-    "version" : "1.0.0",
+    "version" : "1.0.1",
     "description" : "The microphone zone used in a few karaoke worlds",
     "author" : {
         "name" : "aRkker",
