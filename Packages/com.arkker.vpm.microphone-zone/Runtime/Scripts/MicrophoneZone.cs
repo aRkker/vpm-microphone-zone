@@ -30,6 +30,20 @@ public class MicrophoneZone : UdonSharpBehaviour
     private bool localPlayerInZone = false;
 
     private bool songPlaying = false;
+    private bool TXLPlayerPlaying = false;
+    private bool localSingerOffsetActive = false;
+    private float localSingerOffset = 0f;
+    private float localSingerOffsetVideoTime = 0f;
+    private float localSingerOffsetRealtime = 0f;
+
+    private void Start()
+    {
+        if (TXLPlayer != null)
+        {
+            TXLPlayer._Register(TXLVideoPlayer.EVENT_VIDEO_STATE_UPDATE, this, nameof(_OnTXLVideoStateUpdate));
+            _OnTXLVideoStateUpdate();
+        }
+    }
 
     public override void OnPlayerTriggerEnter(VRCPlayerApi player)
     {
@@ -40,14 +54,11 @@ public class MicrophoneZone : UdonSharpBehaviour
         player.SetVoiceGain(voiceGain);
         player.SetVoiceVolumetricRadius(volumetricVoiceRadius);
 
-        if (player.isLocal && TXLPlayer != null && songPlaying)
+        if (player.isLocal && TXLPlayer != null)
         {
             localPlayerInZone = true;
-            float latency = ((Time.realtimeSinceStartup - Networking.SimulationTime(player))) + .2f;
-            Debug.Log("Latency: " + latency);
-            TXLPlayer._SetTargetTime(TXLPlayer.transform.Find("Video Manager").GetComponent<VideoManager>().VideoTime + latency);
-            TXLPlayer.transform.Find("Video Manager").GetComponent<VideoManager>()._VideoSetTime(TXLPlayer.transform.Find("Video Manager").GetComponent<VideoManager>().VideoTime + latency);
-
+            if (songPlaying)
+                ApplyLocalSingerOffset(player);
         }
 
     }
@@ -59,10 +70,7 @@ public class MicrophoneZone : UdonSharpBehaviour
 
         if (localPlayerInZone)
         {
-            float latency = ((Time.realtimeSinceStartup - Networking.SimulationTime(Networking.LocalPlayer))) + .2f;
-            Debug.Log("Latency: " + latency);
-            TXLPlayer._SetTargetTime(TXLPlayer.transform.Find("Video Manager").GetComponent<VideoManager>().VideoTime + latency);
-            TXLPlayer.transform.Find("Video Manager").GetComponent<VideoManager>()._VideoSetTime(TXLPlayer.transform.Find("Video Manager").GetComponent<VideoManager>().VideoTime + latency);
+            SendCustomEventDelayedFrames(nameof(_ApplyLocalSingerOffset), 1);
         }
     }
 
@@ -70,6 +78,8 @@ public class MicrophoneZone : UdonSharpBehaviour
     {
         Debug.Log("Video Ended");
         songPlaying = false;
+        TXLPlayerPlaying = false;
+        ResetLocalSingerOffsetState();
     }
 
     public override void OnPlayerTriggerExit(VRCPlayerApi player)
@@ -88,6 +98,102 @@ public class MicrophoneZone : UdonSharpBehaviour
         if (player.isLocal && TXLPlayer != null)
         {
             localPlayerInZone = false;
+            ClearLocalSingerOffset();
         }
+    }
+
+    public void _OnTXLVideoStateUpdate()
+    {
+        if (TXLPlayer == null)
+        {
+            songPlaying = false;
+            TXLPlayerPlaying = false;
+            ResetLocalSingerOffsetState();
+            return;
+        }
+
+        bool isPlaying = TXLPlayer.playerState == TXLVideoPlayer.VIDEO_STATE_PLAYING;
+        bool startedPlaying = isPlaying && !TXLPlayerPlaying;
+
+        songPlaying = isPlaying;
+        TXLPlayerPlaying = isPlaying;
+
+        if (!isPlaying)
+            ResetLocalSingerOffsetState();
+
+        if (startedPlaying && localPlayerInZone)
+            SendCustomEventDelayedFrames(nameof(_ApplyLocalSingerOffset), 1);
+    }
+
+    public void _ApplyLocalSingerOffset()
+    {
+        ApplyLocalSingerOffset(Networking.LocalPlayer);
+    }
+
+    private void ApplyLocalSingerOffset(VRCPlayerApi player)
+    {
+        if (TXLPlayer == null || player == null || !player.isLocal || !songPlaying)
+            return;
+
+        VideoManager videoManager = TXLPlayer.VideoManager;
+        if (videoManager == null || !videoManager.VideoIsSeekable)
+            return;
+
+        float now = Time.realtimeSinceStartup;
+        float latency = (now - Networking.SimulationTime(player)) + .2f;
+        float duration = videoManager.VideoDuration;
+        float baseTime = videoManager.VideoTime;
+
+        if (localSingerOffsetActive)
+        {
+            if (LocalSingerOffsetStillApplied(videoManager))
+                baseTime = Mathf.Max(0f, baseTime - localSingerOffset);
+            else
+                ResetLocalSingerOffsetState();
+        }
+
+        float targetTime = Mathf.Clamp(baseTime + latency, 0f, duration - 1f);
+
+        Debug.Log("Latency: " + latency);
+        videoManager._VideoSetTime(targetTime);
+
+        localSingerOffset = targetTime - baseTime;
+        localSingerOffsetVideoTime = targetTime;
+        localSingerOffsetRealtime = now;
+        localSingerOffsetActive = localSingerOffset > 0.001f;
+    }
+
+    private void ClearLocalSingerOffset()
+    {
+        if (!localSingerOffsetActive || TXLPlayer == null)
+        {
+            ResetLocalSingerOffsetState();
+            return;
+        }
+
+        VideoManager videoManager = TXLPlayer.VideoManager;
+        if (videoManager != null && videoManager.VideoIsSeekable && LocalSingerOffsetStillApplied(videoManager))
+        {
+            float duration = videoManager.VideoDuration;
+            float targetTime = Mathf.Clamp(videoManager.VideoTime - localSingerOffset, 0f, duration - 1f);
+            videoManager._VideoSetTime(targetTime);
+        }
+
+        ResetLocalSingerOffsetState();
+    }
+
+    private bool LocalSingerOffsetStillApplied(VideoManager videoManager)
+    {
+        float expectedTime = localSingerOffsetVideoTime + (Time.realtimeSinceStartup - localSingerOffsetRealtime);
+        float tolerance = Mathf.Max(0.35f, localSingerOffset * 0.5f);
+        return Mathf.Abs(videoManager.VideoTime - expectedTime) <= tolerance;
+    }
+
+    private void ResetLocalSingerOffsetState()
+    {
+        localSingerOffsetActive = false;
+        localSingerOffset = 0f;
+        localSingerOffsetVideoTime = 0f;
+        localSingerOffsetRealtime = 0f;
     }
 }
